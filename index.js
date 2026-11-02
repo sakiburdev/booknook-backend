@@ -59,7 +59,6 @@ app.get("/books/:id", async (req, res) => {
   res.send(result);
 });
 
-
 app.post("/books", async (req, res) => {
 
   const data = req.body;
@@ -94,6 +93,42 @@ app.post("/books", async (req, res) => {
 });
 
 
+app.patch("/books/:id", async (req, res) => {
+
+  const { id } = req.params;
+  const updatedData = req.body;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({
+      message: "Invalid Book ID",
+    });
+  }
+
+  delete updatedData._id;
+  delete updatedData.userEmail;
+  delete updatedData.addedAt;
+
+  const result = await booksCollection.updateOne(
+    {
+      _id: new ObjectId(id),
+      userEmail: req.user.email,
+    },
+    {
+      $set: updatedData,
+    }
+  );
+
+  if (result.matchedCount === 0) {
+    return res.status(404).send({
+      message: "Book Not Found or Unauthorized",
+    });
+  }
+
+  res.send({
+    success: true,
+    message: "Book Updated Successfully",
+  });
+});
 
 
 
