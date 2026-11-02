@@ -60,6 +60,40 @@ app.get("/books/:id", async (req, res) => {
 });
 
 
+app.post("/books", async (req, res) => {
+
+  const data = req.body;
+
+  const userEmail = req.user.email;
+
+  if (data.userEmail !== userEmail) {
+    return res.status(403).send({
+      message: "You cannot add a book for another user",
+    });
+  }
+
+  data.addedAt = new Date();
+
+  data.totalCopies = Number(data.totalCopies);
+
+  if (!data.title || !data.author || !data.totalCopies ||
+      data.totalCopies < 1) {
+    return res.status(400).send({
+      message: "Please provide valid book information",
+    });
+  }
+
+  // Database Book Add
+  const result = await booksCollection.insertOne(data);
+
+  res.status(201).send({
+    success: true,
+    message: "Book Added Successfully",
+    insertedId: result.insertedId,
+  });
+});
+
+
 
 
 
