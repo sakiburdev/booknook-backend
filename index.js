@@ -258,11 +258,52 @@ app.get("/borrows", async (req, res) => {
   res.send(result);
 });
 
+app.delete("/borrows/:id", async (req, res) => {
 
+  const { id } = req.params;
 
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({
+      message: "Invalid Borrow ID",
+    });
+  }
 
+  const borrow = await borrowsCollection.findOne({
+    _id: new ObjectId(id),
+    userEmail: req.user.email,
+  });
 
+  if (!borrow) {
+    return res.status(404).send({
+      message: "Borrow Record Not Found",
+    });
+  }
 
+  const result = await borrowsCollection.deleteOne({
+    _id: new ObjectId(id),
+    userEmail: req.user.email,
+  });
+
+  if (result.deletedCount === 0) {
+    return res.status(404).send({
+      message: "Borrow Record Not Found",
+    });
+  }
+
+  await booksCollection.updateOne(
+    {
+      _id: borrow.bookId,
+    },
+    {
+      $inc: { totalCopies: 1 },
+    }
+  );
+
+  res.send({
+    success: true,
+    message: "Book Returned Successfully",
+  });
+});
 
 
 
