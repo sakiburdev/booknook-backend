@@ -2,40 +2,96 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import { MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const app = express();
 const port = process.env.PORT || 8000;
 
-app.use(cors());
+const BETTER_AUTH_URL =
+  process.env.BETTER_AUTH_URL || "http://localhost:3000";
+
+// Middleware
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
+const JWKS = createRemoteJWKSet(
+  new URL(`${BETTER_AUTH_URL}/api/auth/jwks`)
+);
 
-// MongoDB Connection Setup
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).send({
+      success: false,
+      message: "Authorization token is required",
+    });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).send({
+      success: false,
+      message: "Token not found",
+    });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer: BETTER_AUTH_URL,
+      audience: BETTER_AUTH_URL,
+    });
+
+    if (!payload.email) {
+      return res.status(401).send({
+        success: false,
+        message: "User email not found in token",
+      });
+    }
+
+    req.user = payload;
+
+    next();
+  } catch (error) {
+    console.error("JWT Verification Error:", error.message);
+
+    return res.status(401).send({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
+};
+
+// MongoDB Connection
 const client = new MongoClient(process.env.MONGODB_URL);
 
-export async function connectToMongoDB() {
-  await client.connect();
-  console.log("MongoDB Connected Successfully!");
-  return client;
-}
-const dbClient = await connectToMongoDB();
+await client.connect();
 
-// Project Database
-const db = dbClient.db("booknook");
+console.log("MongoDB Connected Successfully!");
+
+const db = client.db("booknook");
 
 // Collections
 const booksCollection = db.collection("books");
 const borrowsCollection = db.collection("borrows");
 
-// All Books
 app.get("/books", async (req, res) => {
-
-  const result = await booksCollection.find().sort({ addedAt: -1 }).toArray();
+  const result = await booksCollection
+    .find()
+    .sort({ addedAt: -1 })
+    .toArray();
 
   res.send(result);
 });
 
-// Single Book
 app.get("/books/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -45,7 +101,6 @@ app.get("/books/:id", async (req, res) => {
     });
   }
 
-  // Book Collection Find
   const result = await booksCollection.findOne({
     _id: new ObjectId(id),
   });
@@ -59,10 +114,8 @@ app.get("/books/:id", async (req, res) => {
   res.send(result);
 });
 
-app.post("/books", async (req, res) => {
-
+app.post("/books", verifyToken, async (req, res) => {
   const data = req.body;
-
   const userEmail = req.user.email;
 
   if (data.userEmail !== userEmail) {
@@ -72,17 +125,19 @@ app.post("/books", async (req, res) => {
   }
 
   data.addedAt = new Date();
-
   data.totalCopies = Number(data.totalCopies);
 
-  if (!data.title || !data.author || !data.totalCopies ||
-      data.totalCopies < 1) {
+  if (
+    !data.title ||
+    !data.author ||
+    !Number.isInteger(data.totalCopies) ||
+    data.totalCopies < 1
+  ) {
     return res.status(400).send({
       message: "Please provide valid book information",
     });
   }
 
-  // Database Book Add
   const result = await booksCollection.insertOne(data);
 
   res.status(201).send({
@@ -92,9 +147,7 @@ app.post("/books", async (req, res) => {
   });
 });
 
-
-app.patch("/books/:id", async (req, res) => {
-
+app.patch("/books/:id", verifyToken, async (req, res) => {
   const { id } = req.params;
   const updatedData = req.body;
 
@@ -107,6 +160,19 @@ app.patch("/books/:id", async (req, res) => {
   delete updatedData._id;
   delete updatedData.userEmail;
   delete updatedData.addedAt;
+
+  if (updatedData.totalCopies !== undefined) {
+    updatedData.totalCopies = Number(updatedData.totalCopies);
+
+    if (
+      !Number.isInteger(updatedData.totalCopies) ||
+      updatedData.totalCopies < 1
+    ) {
+      return res.status(400).send({
+        message: "Invalid total copies",
+      });
+    }
+  }
 
   const result = await booksCollection.updateOne(
     {
@@ -130,9 +196,7 @@ app.patch("/books/:id", async (req, res) => {
   });
 });
 
-
-app.delete("/books/:id", async (req, res) => {
-
+app.delete("/books/:id", verifyToken, async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
@@ -158,13 +222,11 @@ app.delete("/books/:id", async (req, res) => {
   });
 });
 
-// Borrow Books
-app.post("/borrows", async (req, res) => {
-
+app.post("/borrows", verifyToken, async (req, res) => {
   const { bookId, returnDate } = req.body;
 
   const userEmail = req.user.email;
-  const userName = req.user.name;
+  const userName = req.user.name || "BookNook User";
 
   if (!ObjectId.isValid(bookId)) {
     return res.status(400).send({
@@ -184,7 +246,7 @@ app.post("/borrows", async (req, res) => {
 
   const alreadyBorrowed = await borrowsCollection.findOne({
     bookId: new ObjectId(bookId),
-    userEmail: userEmail,
+    userEmail,
   });
 
   if (alreadyBorrowed) {
@@ -200,7 +262,6 @@ app.post("/borrows", async (req, res) => {
   }
 
   const borrowDate = new Date();
-
   const selectedReturnDate = new Date(returnDate);
 
   if (
@@ -213,6 +274,7 @@ app.post("/borrows", async (req, res) => {
     });
   }
 
+  // Decrease available copies
   const updatedBook = await booksCollection.findOneAndUpdate(
     {
       _id: new ObjectId(bookId),
@@ -236,9 +298,9 @@ app.post("/borrows", async (req, res) => {
     bookId: new ObjectId(bookId),
     bookTitle: book.title,
     bookImage: book.image,
-    userName: userName,
-    userEmail: userEmail,
-    borrowDate: borrowDate,
+    userName,
+    userEmail,
+    borrowDate,
     returnDate: selectedReturnDate,
   };
 
@@ -251,15 +313,16 @@ app.post("/borrows", async (req, res) => {
   });
 });
 
-app.get("/borrows", async (req, res) => {
+app.get("/borrows", verifyToken, async (req, res) => {
+  const result = await borrowsCollection
+    .find({ userEmail: req.user.email })
+    .sort({ borrowDate: -1 })
+    .toArray();
 
-  const userEmail = req.user.email;
-  const result = await borrowsCollection.find({ userEmail: userEmail }).sort({ borrowDate: -1 }).toArray();
   res.send(result);
 });
 
-app.delete("/borrows/:id", async (req, res) => {
-
+app.delete("/borrows/:id", verifyToken, async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
@@ -290,6 +353,7 @@ app.delete("/borrows/:id", async (req, res) => {
     });
   }
 
+  // Increase available copies after returning
   await booksCollection.updateOne(
     {
       _id: borrow.bookId,
@@ -305,14 +369,13 @@ app.delete("/borrows/:id", async (req, res) => {
   });
 });
 
-
-
-
-
-app.get('/', (req, res) => {
-  res.send({ message: 'BookNook Server is Running.' });
+app.get("/", (req, res) => {
+  res.send({
+    message: "BookNook Server is Running.",
+  });
 });
 
+// Start Server
 app.listen(port, () => {
-  console.log(`BookNook Server is Running at ${port}`);
+  console.log(`BookNook Server is Running ${port}`);
 });
