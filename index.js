@@ -25,7 +25,7 @@ const db = dbClient.db("booknook");
 
 // Collections
 const booksCollection = db.collection("books");
-
+const borrowsCollection = db.collection("borrows");
 
 // All Books
 app.get("/books", async (req, res) => {
@@ -157,6 +157,104 @@ app.delete("/books/:id", async (req, res) => {
     message: "Book Deleted Successfully",
   });
 });
+
+// Borrow Books
+app.post("/borrows", async (req, res) => {
+
+  const { bookId, returnDate } = req.body;
+
+  const userEmail = req.user.email;
+  const userName = req.user.name;
+
+  if (!ObjectId.isValid(bookId)) {
+    return res.status(400).send({
+      message: "Invalid Book ID",
+    });
+  }
+
+  const book = await booksCollection.findOne({
+    _id: new ObjectId(bookId),
+  });
+
+  if (!book) {
+    return res.status(404).send({
+      message: "Book Not Found",
+    });
+  }
+
+  const alreadyBorrowed = await borrowsCollection.findOne({
+    bookId: new ObjectId(bookId),
+    userEmail: userEmail,
+  });
+
+  if (alreadyBorrowed) {
+    return res.status(409).send({
+      message: "You have already borrowed this book",
+    });
+  }
+
+  if (book.totalCopies <= 0) {
+    return res.status(400).send({
+      message: "Book is Not Available",
+    });
+  }
+
+  const borrowDate = new Date();
+
+  const selectedReturnDate = new Date(returnDate);
+
+  if (
+    !returnDate ||
+    isNaN(selectedReturnDate.getTime()) ||
+    selectedReturnDate <= borrowDate
+  ) {
+    return res.status(400).send({
+      message: "Please provide a valid future return date",
+    });
+  }
+
+  const updatedBook = await booksCollection.findOneAndUpdate(
+    {
+      _id: new ObjectId(bookId),
+      totalCopies: { $gt: 0 },
+    },
+    {
+      $inc: { totalCopies: -1 },
+    },
+    {
+      returnDocument: "after",
+    }
+  );
+
+  if (!updatedBook) {
+    return res.status(400).send({
+      message: "Book is Not Available",
+    });
+  }
+
+  const borrowData = {
+    bookId: new ObjectId(bookId),
+    bookTitle: book.title,
+    bookImage: book.image,
+    userName: userName,
+    userEmail: userEmail,
+    borrowDate: borrowDate,
+    returnDate: selectedReturnDate,
+  };
+
+  const result = await borrowsCollection.insertOne(borrowData);
+
+  res.status(201).send({
+    success: true,
+    message: "Book Borrowed Successfully",
+    insertedId: result.insertedId,
+  });
+});
+
+
+
+
+
 
 
 
