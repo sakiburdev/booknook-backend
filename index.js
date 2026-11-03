@@ -251,8 +251,12 @@ app.post("/borrows", async (req, res) => {
   });
 });
 
+app.get("/borrows", async (req, res) => {
 
-
+  const userEmail = req.user.email;
+  const result = await borrowsCollection.find({ userEmail: userEmail }).sort({ borrowDate: -1 }).toArray();
+  res.send(result);
+});
 
 
 
