@@ -384,3 +384,5 @@ app.get("/", (req, res) => {
 app.listen(port, () => {
   console.log(`BookNook Server is Running ${port}`);
 });
+
+export default app
