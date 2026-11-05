@@ -7,8 +7,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 const app = express();
 const port = process.env.PORT || 8000;
 
-const BETTER_AUTH_URL =
-  process.env.BETTER_AUTH_URL || "http://localhost:3000";
+const BETTER_AUTH_URL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
 
 // Middleware
 app.use(
@@ -16,14 +15,12 @@ app.use(
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 app.use(express.json());
 
-const JWKS = createRemoteJWKSet(
-  new URL(`${BETTER_AUTH_URL}/api/auth/jwks`)
-);
+const JWKS = createRemoteJWKSet(new URL(`${BETTER_AUTH_URL}/api/auth/jwks`));
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -83,16 +80,22 @@ const db = client.db("booknook");
 const booksCollection = db.collection("books");
 const borrowsCollection = db.collection("borrows");
 
-app.get("/books", async (req, res) => {
+app.get("/books/mine", verifyToken, async (req, res) => {
   const result = await booksCollection
-    .find()
+    .find({ userEmail: req.user.email })
     .sort({ addedAt: -1 })
     .toArray();
 
   res.send(result);
 });
 
-app.get("/books/:id", async (req, res) => {
+app.get("/books", async (req, res) => {
+  const result = await booksCollection.find().sort({ addedAt: -1 }).toArray();
+
+  res.send(result);
+});
+
+app.get("/books/:id", verifyToken, async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
@@ -115,6 +118,7 @@ app.get("/books/:id", async (req, res) => {
 });
 
 app.post("/books", verifyToken, async (req, res) => {
+  // ok
   const data = req.body;
   const userEmail = req.user.email;
 
@@ -126,6 +130,7 @@ app.post("/books", verifyToken, async (req, res) => {
 
   data.addedAt = new Date();
   data.totalCopies = Number(data.totalCopies);
+  data.userName = req.user.name || data.userEmail;
 
   if (
     !data.title ||
@@ -181,7 +186,7 @@ app.patch("/books/:id", verifyToken, async (req, res) => {
     },
     {
       $set: updatedData,
-    }
+    },
   );
 
   if (result.matchedCount === 0) {
@@ -285,7 +290,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
     },
     {
       returnDocument: "after",
-    }
+    },
   );
 
   if (!updatedBook) {
@@ -360,7 +365,7 @@ app.delete("/borrows/:id", verifyToken, async (req, res) => {
     },
     {
       $inc: { totalCopies: 1 },
-    }
+    },
   );
 
   res.send({
